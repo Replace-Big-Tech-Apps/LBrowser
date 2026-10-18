@@ -6,7 +6,7 @@ one amber accent, Zen Dots labels and Alumni Sans Pinstripe numerals.
 
 ## Download and install
 
-Download **LBrowser-1.0.dmg** from the [latest release](https://github.com/Replace-Big-Tech-Apps/LBrowser/releases/latest).
+Download **LBrowser-1.1.dmg** from the [latest release](https://github.com/Replace-Big-Tech-Apps/LBrowser/releases/latest).
 Requires macOS 15 or later; the release supports Apple Silicon and Intel Macs.
 Open the disk image, drag **LBrowser.app** to **Applications**, and eject the disk image.
 
@@ -19,7 +19,7 @@ if you trust the download.
 ```bash
 ./build.sh            # -> build/LBrowser.app
 ./build.sh --install  # also copies to /Applications
-./build.sh --universal --dmg  # -> build/LBrowser-1.0.dmg (Apple Silicon + Intel)
+./build.sh --universal --dmg  # -> build/LBrowser-1.1.dmg (Apple Silicon + Intel)
 ```
 
 Requires Xcode (the SwiftUI macros aren't in the Command Line Tools).
@@ -35,6 +35,10 @@ checksum is written alongside it. To package an existing build, run `./scripts/m
   Private tabs share temporary cookies and website storage, have no password autofill/saving,
   and are excluded from session restore and recently closed tabs. Turning Private off closes
   those tabs and returns to your regular session. Downloads remain in ~/Downloads.
+- **Smart address bar**: sites you visit often are completed inline as you type (Enter opens them),
+  and a dropdown shows matching history plus live suggestions from your search engine (↑/↓ to pick,
+  Esc to close). History stays on your Mac; private tabs are never recorded and fetch no suggestions.
+  Turn suggestions off or clear history in Settings.
 - **Tab groups**: colored, collapsible, renameable groups in the sidebar. Drag tabs between groups,
   or right-click a tab → Move to Group.
 - **Passwords via [Safespace](../Safespace-for-Mac)**: focus a login field to pick a saved login
