@@ -4,6 +4,7 @@ import WebKit
 struct BrowserView: View {
     @Environment(BrowserStore.self) private var store
     @State private var ready = false
+    @State private var omnibox = Omnibox()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +21,17 @@ struct BrowserView: View {
                 WebArea()
             }
         }
+        .overlayPreferenceValue(OmniboxAnchorKey.self) { anchor in
+            GeometryReader { geo in
+                if let anchor, omnibox.isOpen {
+                    let rect = geo[anchor]
+                    SuggestionList { open($0.url) }
+                        .frame(width: rect.width)
+                        .offset(x: rect.minX, y: rect.maxY + 6)
+                }
+            }
+        }
+        .environment(omnibox)
         .background(Orbis.canvas)
         .foregroundStyle(Orbis.ink)
         .ignoresSafeArea()
@@ -31,6 +43,12 @@ struct BrowserView: View {
             await WebEngine.shared.prepare()
             store.restore()
         }
+    }
+
+    private func open(_ url: URL) {
+        omnibox.close()
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        store.load(url)
     }
 }
 
@@ -102,8 +120,8 @@ struct ShieldToggle: View {
 
 struct AddressBar: View {
     @Environment(BrowserStore.self) private var store
-    @State private var text = ""
-    @FocusState private var focused: Bool
+    @Environment(Omnibox.self) private var omnibox
+    @State private var focused = false
 
     private var displayText: String { store.selected?.url?.absoluteString ?? "" }
 
@@ -116,20 +134,16 @@ struct AddressBar: View {
     var body: some View {
         let secure = store.selected?.url?.scheme == "https"
         HStack(spacing: 8) {
-            ZStack {
-                TextField(store.isPrivate ? "Search privately or enter address" : "Search or enter address", text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .focused($focused)
-                    .opacity(focused || store.selected?.url == nil ? 1 : 0)
-                    .onSubmit {
-                        store.navigate(text)
-                        focused = false
-                    }
-                    .onExitCommand {
-                        text = displayText
-                        focused = false
-                    }
+            ZStack(alignment: .leading) {
+                OmniboxField(
+                    omnibox: omnibox,
+                    placeholder: store.isPrivate ? "Search privately or enter address" : "Search or enter address",
+                    displayText: displayText,
+                    focusTick: store.focusAddressTick,
+                    isPrivate: store.isPrivate,
+                    isFocused: $focused
+                ) { store.load($0) }
+                .opacity(focused || store.selected?.url == nil ? 1 : 0)
                 if !focused, store.selected?.url != nil {
                     HStack(spacing: 6) {
                         if secure { Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Orbis.inkWhisper) }
@@ -157,13 +171,9 @@ struct AddressBar: View {
         .background(RoundedRectangle(cornerRadius: Orbis.radiusSM).fill(focused ? Orbis.canvas : Orbis.surface))
         .overlay(RoundedRectangle(cornerRadius: Orbis.radiusSM).strokeBorder(focused ? Orbis.ink : Orbis.line))
         .overlay(alignment: .bottom) { LoadingLine() }
+        .anchorPreference(key: OmniboxAnchorKey.self, value: .bounds) { $0 }
         .contentShape(Rectangle())
-        .onTapGesture { focused = true }
-        .onAppear { text = displayText }
-        .onChange(of: store.selected?.url) { if !focused { text = displayText } }
-        .onChange(of: store.selectedID) { text = displayText }
-        .onChange(of: store.focusAddressTick) { focused = true }
-        .onChange(of: focused) { if focused { text = displayText } }
+        .onTapGesture { store.focusAddressTick += 1 }
     }
 }
 

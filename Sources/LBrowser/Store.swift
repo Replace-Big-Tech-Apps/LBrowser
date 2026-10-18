@@ -51,6 +51,13 @@ enum AddressParser {
     static func url(from input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
+        return address(from: text) ?? SearchEngine.current.url(for: text)
+    }
+
+    /// The URL the input names, or nil when it should be searched for instead.
+    static func address(from input: String) -> URL? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
         if text.contains("://") || text.hasPrefix("about:"), let u = URL(string: text) { return u }
         if !text.contains(" ") {
             if text.hasPrefix("localhost") || text.hasPrefix("127.0.0.1") { return URL(string: "http://" + text) }
@@ -58,7 +65,7 @@ enum AddressParser {
                 return u
             }
         }
-        return SearchEngine.current.url(for: text)
+        return nil
     }
 }
 
@@ -229,7 +236,10 @@ final class BrowserStore {
     }
 
     func navigate(_ text: String) {
-        guard let url = AddressParser.url(from: text) else { return }
+        if let url = AddressParser.url(from: text) { load(url) }
+    }
+
+    func load(_ url: URL) {
         if let selected { selected.load(url) } else { newTab(url) }
     }
 

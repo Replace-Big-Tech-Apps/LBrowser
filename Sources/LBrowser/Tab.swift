@@ -58,6 +58,7 @@ final class BrowserTab: Identifiable {
                 MainActor.assumeIsolated {
                     guard let self, let t = w.title, !t.isEmpty else { return }
                     self.title = t
+                    if !self.isPrivate, let u = w.url { HistoryStore.shared.updateTitle(t, for: u) }
                 }
             },
             web.observe(\.url) { [weak self] w, _ in
@@ -156,6 +157,9 @@ final class TabDelegate: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloa
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let tab, !tab.isPrivate, let url = webView.url {
+            HistoryStore.shared.recordVisit(url, title: webView.title)
+        }
         tab?.refreshFavicon()
         tab?.store?.scheduleSave()
     }

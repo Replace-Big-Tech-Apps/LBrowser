@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         BrowserStore.shared.save()
+        HistoryStore.shared.save()
     }
 }
 
@@ -91,6 +92,7 @@ struct SettingsView: View {
     @Environment(BrowserStore.self) private var store
     @AppStorage("searchEngine") private var engine = SearchEngine.duckduckgo.rawValue
     @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("searchSuggestions") private var searchSuggestions = true
     @State private var autofill = WebEngine.shared.isAutofillEnabled
 
     var body: some View {
@@ -102,6 +104,10 @@ struct SettingsView: View {
             }
             Picker("Search engine", selection: $engine) {
                 ForEach(SearchEngine.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            Toggle("Show search suggestions while typing", isOn: $searchSuggestions)
+            LabeledContent("History") {
+                Button("Clear History") { HistoryStore.shared.clear() }
             }
             Toggle("Block ads & trackers", isOn: Binding(get: { store.adBlockEnabled }, set: { store.setAdBlock($0) }))
             Toggle("Autofill & save passwords with Safespace", isOn: $autofill)
