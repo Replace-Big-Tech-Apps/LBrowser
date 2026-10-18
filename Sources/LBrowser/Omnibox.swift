@@ -24,11 +24,11 @@ final class Omnibox {
     @ObservationIgnored var isPrivate = false
     @ObservationIgnored private var remote: [String] = []
     @ObservationIgnored private var fetchTask: Task<Void, Never>?
-    @ObservationIgnored private let history: HistoryStore
+    @ObservationIgnored var history: HistoryStore
     private let maxRows = 8
 
     init(history: HistoryStore? = nil) {
-        self.history = history ?? .shared
+        self.history = history ?? ProfileContext.default.history
     }
 
     private var query: String { typed.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -81,9 +81,9 @@ final class Omnibox {
             rows.append(Suggestion(kind: .search, title: q, detail: "Search \(engine.label)", url: url, fill: q))
         }
 
-        let shown = Set(rows.map { Self.key($0.url) })
+        let shown = Set(rows.map { $0.url.comparisonKey })
         let pages = history.matches(for: q, limit: maxRows)
-            .filter { !shown.contains(Self.key($0.url)) }
+            .filter { !shown.contains($0.url.comparisonKey) }
             .map { e in
                 let bare = e.bareURL.hasPrefix("www.") ? String(e.bareURL.dropFirst(4)) : e.bareURL
                 return Suggestion(kind: .history, title: e.title.isEmpty ? bare : e.title, detail: bare,
@@ -117,12 +117,6 @@ final class Omnibox {
             if self.highlighted == 0, !self.suggestions.isEmpty { self.rebuild() }
         }
     }
-
-    private static func key(_ url: URL) -> String {
-        var s = url.absoluteString.lowercased()
-        if s.hasSuffix("/") { s.removeLast() }
-        return s
-    }
 }
 
 // MARK: Field
@@ -134,6 +128,9 @@ struct OmniboxField: NSViewRepresentable {
     var displayText: String
     var focusTick: Int
     var isPrivate: Bool
+    var fontSize: CGFloat = 12
+    /// Focus as soon as the field appears (the start page's search field).
+    var autofocus = false
     @Binding var isFocused: Bool
     var onCommit: (URL) -> Void
 
@@ -144,7 +141,7 @@ struct OmniboxField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 12)
+        field.font = .systemFont(ofSize: fontSize)
         field.textColor = .labelColor
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
@@ -159,6 +156,7 @@ struct OmniboxField: NSViewRepresentable {
             if let field { coordinator?.didFocus(field) }
         }
         context.coordinator.lastTick = focusTick
+        if autofocus { DispatchQueue.main.async { field.window?.makeFirstResponder(field) } }
         return field
     }
 

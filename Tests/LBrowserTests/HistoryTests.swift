@@ -61,4 +61,34 @@ final class HistoryTests: XCTestCase {
         XCTAssertEqual(SearchSuggestions.parse(data), ["swift", "swiftui"])
         XCTAssertEqual(SearchSuggestions.parse(Data("nope".utf8)), [])
     }
+
+    @MainActor
+    func testClearHistoryWinsOverOlderRemoteVisits() throws {
+        let history = HistoryStore(fileURL: nil)
+        let old = HistoryStore.Entry(url: URL(string: "https://old.example/")!, title: "Old", visitCount: 9,
+                                     lastVisit: Date().addingTimeInterval(-3600))
+        history.merge(HistoryStore.Snapshot(entries: [old]))
+        XCTAssertEqual(history.entries.count, 1)
+
+        history.clear()
+        history.merge(HistoryStore.Snapshot(entries: [old]))
+        XCTAssertTrue(history.entries.isEmpty, "visits from before the clear must not come back")
+
+        let fresh = HistoryStore.Entry(url: URL(string: "https://new.example/")!, title: "New", visitCount: 1,
+                                       lastVisit: Date().addingTimeInterval(5))
+        history.merge(HistoryStore.Snapshot(entries: [fresh]))
+        XCTAssertEqual(history.entries.count, 1)
+
+        // Another Mac cleared later: this Mac drops what it had before then.
+        history.merge(HistoryStore.Snapshot(entries: [], clearedAt: Date().addingTimeInterval(10)))
+        XCTAssertTrue(history.entries.isEmpty)
+    }
+
+    func testHistoryFileStillReadsOldArrayFormat() throws {
+        let json = #"[{"url":"https://a.example/","title":"A","visitCount":2,"lastVisit":800000000}]"#
+        let snapshot = try XCTUnwrap(HistoryStore.Snapshot.decode(Data(json.utf8)))
+        XCTAssertEqual(snapshot.entries.first?.title, "A")
+        XCTAssertNil(snapshot.clearedAt)
+        XCTAssertEqual(URL(string: "https://A.example/")!.comparisonKey, URL(string: "https://a.example")!.comparisonKey)
+    }
 }

@@ -3,8 +3,8 @@ import SwiftUI
 struct StartPage: View {
     @Environment(BrowserStore.self) private var store
     let tab: BrowserTab
-    @State private var query = ""
-    @FocusState private var searchFocused: Bool
+    @State private var omnibox = Omnibox()
+    @State private var searchFocused = false
 
     private static let shortcuts: [(String, String)] = [
         ("YouTube", "https://www.youtube.com"),
@@ -18,7 +18,7 @@ struct StartPage: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 14) {
-                searchField.frame(maxWidth: 560)
+                searchField.frame(maxWidth: 560).zIndex(1)
                 if store.isPrivate {
                     Text("Private browsing — tabs and website data are discarded when you exit. Downloads are kept.")
                         .font(.system(size: 12))
@@ -38,29 +38,55 @@ struct StartPage: View {
                 .frame(width: 320)
                 .hairline(.leading)
         }
+        .onAppear { omnibox.history = store.profile.history }
     }
 
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(Orbis.inkWhisper)
-            TextField("", text: $query, prompt: Text("Search \(SearchEngine.current.label) or type a URL")
-                .font(OrbisFont.display(9)).foregroundStyle(Orbis.inkWhisper))
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .focused($searchFocused)
-                .onSubmit { if let url = AddressParser.url(from: query) { tab.load(url) } }
+            OmniboxField(
+                omnibox: omnibox,
+                placeholder: "Search \(SearchEngine.current.label) or type a URL",
+                displayText: "",
+                focusTick: store.focusAddressTick,
+                isPrivate: store.isPrivate,
+                fontSize: 13,
+                autofocus: true,
+                isFocused: $searchFocused
+            ) { tab.load($0) }
+            PrivateToggle()
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
         .frame(height: 38)
         .background(RoundedRectangle(cornerRadius: Orbis.radiusXS).fill(Orbis.canvas))
         .overlay(RoundedRectangle(cornerRadius: Orbis.radiusXS).strokeBorder(searchFocused ? Orbis.ink : Orbis.line))
+        .overlay(alignment: .topLeading) {
+            if omnibox.isOpen {
+                SuggestionList { suggestion in
+                    omnibox.close()
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                    tab.load(suggestion.url)
+                }
+                .environment(omnibox)
+                .fixedSize(horizontal: false, vertical: true)
+                .offset(y: 44)
+            }
+        }
     }
 
     /// ORBIS category filter bar.
     private var shortcutBar: some View {
         HStack(spacing: 0) {
-            ForEach(Self.shortcuts, id: \.0) { name, link in
-                ShortcutChip(name: name) { if let url = URL(string: link) { tab.load(url) } }
+            let favorites = store.profile.bookmarks.favorites.prefix(8)
+            if favorites.isEmpty {
+                ForEach(Self.shortcuts, id: \.0) { name, link in
+                    ShortcutChip(name: name) { if let url = URL(string: link) { tab.load(url) } }
+                }
+            } else {
+                ForEach(Array(favorites)) { b in
+                    ShortcutChip(name: String(b.title.prefix(18))) { tab.load(b.url) }
+                }
             }
         }
         .padding(.horizontal, 4)

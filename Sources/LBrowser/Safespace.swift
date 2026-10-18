@@ -268,7 +268,7 @@ final class SafespaceAutofill: NSObject, WKScriptMessageHandlerWithReply {
             if waiting.isEmpty, notice?.awaitsUnlock == true { notice = nil }
             for login in waiting { await save(login) }
             // Let an open login dropdown pick up the newly unlocked vault.
-            _ = try? await BrowserStore.shared.selected?.existingWebView?
+            _ = try? await WindowManager.shared.activeStore?.selected?.existingWebView?
                 .evaluateJavaScript("window.__safespaceRefresh && window.__safespaceRefresh()", in: nil, contentWorld: Self.world)
         }
     }

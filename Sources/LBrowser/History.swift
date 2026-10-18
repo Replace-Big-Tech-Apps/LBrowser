@@ -4,7 +4,6 @@ import Observation
 /// Visited pages, ranked by "frecency" (visit count weighted by recency). Private tabs never record.
 @Observable @MainActor
 final class HistoryStore {
-    static let shared = HistoryStore()
 
     struct Entry: Codable, Identifiable, Equatable {
         var url: URL
@@ -39,24 +38,37 @@ final class HistoryStore {
     }
 
     private(set) var entries: [URL: Entry] = [:]
+    /// When history was last cleared; older visits from other Macs (iCloud sync) are ignored.
+    @ObservationIgnored private(set) var clearedAt: Date?
 
-    @ObservationIgnored private let fileURL: URL?
-    @ObservationIgnored private var saveTask: Task<Void, Never>?
-    private let limit = 5000
+    /// On-disk and sync format. Older files are a bare array of entries.
+    struct Snapshot: Codable {
+        var entries: [Entry]
+        var clearedAt: Date?
 
-    init(fileURL: URL? = HistoryStore.defaultFileURL) {
-        self.fileURL = fileURL
-        if let fileURL, let data = try? Data(contentsOf: fileURL),
-           let saved = try? JSONDecoder().decode([Entry].self, from: data) {
-            entries = Dictionary(saved.map { ($0.url, $0) }, uniquingKeysWith: { a, b in a.lastVisit > b.lastVisit ? a : b })
+        static func decode(_ data: Data) -> Snapshot? {
+            if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) { return snapshot }
+            return (try? JSONDecoder().decode([Entry].self, from: data)).map { Snapshot(entries: $0) }
         }
     }
 
-    nonisolated private static var defaultFileURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "LBrowser", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appending(path: "history.json")
+    /// Sorted so the same history always encodes to the same bytes (sync skips unchanged files).
+    var snapshot: Snapshot {
+        Snapshot(entries: entries.values.sorted { $0.url.absoluteString < $1.url.absoluteString }, clearedAt: clearedAt)
+    }
+
+    @ObservationIgnored private let fileURL: URL?
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// Called after local changes (iCloud sync hooks in here).
+    @ObservationIgnored var onChange: (() -> Void)?
+    private let limit = 5000
+
+    init(fileURL: URL?) {
+        self.fileURL = fileURL
+        if let fileURL, let data = try? Data(contentsOf: fileURL), let saved = Snapshot.decode(data) {
+            entries = Dictionary(saved.entries.map { ($0.url, $0) }, uniquingKeysWith: { a, b in a.lastVisit > b.lastVisit ? a : b })
+            clearedAt = saved.clearedAt
+        }
     }
 
     // MARK: Recording
@@ -69,11 +81,14 @@ final class HistoryStore {
         entry.lastVisit = .now
         if let title, !title.isEmpty { entry.title = title }
         entries[key] = entry
-        if entries.count > limit {
-            let drop = entries.values.sorted { $0.score() < $1.score() }.prefix(entries.count - limit)
-            drop.forEach { entries.removeValue(forKey: $0.url) }
-        }
+        trimToLimit()
         scheduleSave()
+    }
+
+    private func trimToLimit() {
+        guard entries.count > limit else { return }
+        let drop = entries.values.sorted { $0.score() < $1.score() }.prefix(entries.count - limit)
+        drop.forEach { entries.removeValue(forKey: $0.url) }
     }
 
     func updateTitle(_ title: String, for url: URL) {
@@ -86,8 +101,34 @@ final class HistoryStore {
 
     func clear() {
         entries = [:]
+        clearedAt = .now
         saveTask?.cancel()
         save()
+        onChange?()
+    }
+
+    /// Merges another Mac's history: keeps the larger visit count and the latest visit.
+    /// A newer "cleared" mark from either side wins, so Clear History sticks across Macs.
+    func merge(_ remote: Snapshot) {
+        var changed = false
+        if let remoteCleared = remote.clearedAt, remoteCleared > (clearedAt ?? .distantPast) {
+            clearedAt = remoteCleared
+            entries = entries.filter { $0.value.lastVisit > remoteCleared }
+            changed = true
+        }
+        let cutoff = clearedAt ?? .distantPast
+        for r in remote.entries where r.lastVisit > cutoff {
+            if var local = entries[r.url] {
+                let merged = Entry(url: r.url, title: r.lastVisit > local.lastVisit && !r.title.isEmpty ? r.title : local.title,
+                                   visitCount: max(local.visitCount, r.visitCount), lastVisit: max(local.lastVisit, r.lastVisit))
+                if merged != local { local = merged; entries[r.url] = local; changed = true }
+            } else {
+                entries[r.url] = r
+                changed = true
+            }
+        }
+        trimToLimit()
+        if changed { save() }
     }
 
     /// Drops the fragment so "page#section" and "page" count as one page.
@@ -174,6 +215,7 @@ final class HistoryStore {
     // MARK: Persistence
 
     private func scheduleSave() {
+        onChange?()
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
@@ -184,7 +226,7 @@ final class HistoryStore {
 
     func save() {
         guard let fileURL else { return }
-        if let data = try? JSONEncoder().encode(Array(entries.values)) {
+        if let data = try? JSONEncoder().encode(snapshot) {
             try? data.write(to: fileURL, options: .atomic)
         }
     }
@@ -235,5 +277,14 @@ enum SearchSuggestions {
               let list = json[1] as? [String] else { return [] }
         var seen = Set<String>()
         return list.filter { seen.insert($0.lowercased()).inserted }
+    }
+}
+
+extension URL {
+    /// The same page for bookmark and suggestion de-duplication: case-insensitive, ignoring a trailing slash.
+    var comparisonKey: String {
+        var s = absoluteString.lowercased()
+        if s.hasSuffix("/") { s.removeLast() }
+        return s
     }
 }

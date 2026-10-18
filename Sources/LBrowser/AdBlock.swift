@@ -1,26 +1,48 @@
 import Foundation
 import WebKit
 
-/// Owns the shared WebKit configuration: content blockers, YouTube ad script, Safespace autofill.
-@MainActor
+/// Owns the shared WebKit configuration: content blockers, YouTube ad script, Safespace autofill,
+/// LBrowser's page helpers and (per profile) web extensions.
+@Observable @MainActor
 final class WebEngine {
     static let shared = WebEngine()
     static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
-    let contentController = WKUserContentController()
-    private let privateContentController = WKUserContentController()
-    private var ruleLists: [WKContentRuleList] = []
+    @ObservationIgnored let contentController = WKUserContentController()
+    @ObservationIgnored private let privateContentController = WKUserContentController()
+    @ObservationIgnored private var ruleLists: [WKContentRuleList] = []
     private(set) var isAdBlockEnabled = UserDefaults.standard.object(forKey: "adBlockEnabled") as? Bool ?? true
     private(set) var isAutofillEnabled = UserDefaults.standard.object(forKey: "safespaceAutofill") as? Bool ?? true
+    private(set) var developerToolsEnabled = UserDefaults.standard.bool(forKey: "developerTools")
 
     init() {
         contentController.addScriptMessageHandler(
             SafespaceAutofill.shared, contentWorld: SafespaceAutofill.world, name: SafespaceAutofill.handlerName)
+        for controller in [contentController, privateContentController] {
+            controller.add(PageScripts.handler, contentWorld: PageScripts.world, name: PageScripts.handlerName)
+            controller.addScriptMessageHandler(GeolocationBridge.handler, contentWorld: .page, name: GeolocationBridge.handlerName)
+        }
         apply()
     }
 
+    func setDeveloperTools(_ enabled: Bool) {
+        developerToolsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "developerTools")
+        for store in WindowManager.shared.openStores {
+            store.orderedTabs.forEach { $0.existingWebView?.isInspectable = enabled }
+        }
+    }
+
+    @ObservationIgnored private var preparing: Task<Void, Never>?
+
+    /// Compiles the content blockers once, however many windows ask.
     func prepare() async {
+        if preparing == nil { preparing = Task { await compileRules() } }
+        await preparing?.value
+    }
+
+    private func compileRules() async {
         let lists = [("lb-network", AdRules.networkJSON), ("lb-cosmetic", AdRules.cosmeticJSON)]
         for (identifier, json) in lists {
             do {
@@ -52,6 +74,10 @@ final class WebEngine {
         if isAutofillEnabled { contentController.addUserScript(SafespaceAutofill.shared.userScript) }
         privateContentController.removeAllContentRuleLists()
         privateContentController.removeAllUserScripts()
+        for controller in [contentController, privateContentController] {
+            controller.addUserScript(PageScripts.userScript)
+            controller.addUserScript(GeolocationBridge.userScript)
+        }
         guard isAdBlockEnabled else { return }
         for controller in [contentController, privateContentController] {
             ruleLists.forEach(controller.add)
@@ -60,13 +86,18 @@ final class WebEngine {
         }
     }
 
-    func makeConfiguration(dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
+    func makeConfiguration(dataStore: WKWebsiteDataStore, profileID: String = Profile.defaultID) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         config.userContentController = dataStore.isPersistent ? contentController : privateContentController
         config.websiteDataStore = dataStore
         config.preferences.isElementFullscreenEnabled = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.defaultWebpagePreferences.preferredContentMode = .desktop
+        if developerToolsEnabled, config.preferences.responds(to: NSSelectorFromString("_setDeveloperExtrasEnabled:")) {
+            // Adds "Inspect Element" to the page's context menu.
+            config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        }
+        if dataStore.isPersistent { Extensions.shared.attach(to: config, profileID: profileID) }
         return config
     }
 }

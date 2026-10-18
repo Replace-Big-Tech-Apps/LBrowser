@@ -61,6 +61,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSCameraUsageDescription</key><string>Websites you allow can use your camera, for example for video calls.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Websites you allow can use your microphone, for example for calls and voice input.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>Websites you allow can use your location, for example for maps.</string>
+  <key>NSLocationUsageDescription</key><string>Websites you allow can use your location, for example for maps.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
